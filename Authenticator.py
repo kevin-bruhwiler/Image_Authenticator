@@ -1,19 +1,22 @@
 from keras.models import Sequential
-from keras.layers import Dense, Conv2D, MaxPooling2D, Dropout, GlobalMaxPooling2D
+from keras.layers import Dense, Conv2D, MaxPooling2D, Dropout, GlobalMaxPooling2D, BatchNormalization
 from keras.optimizers import rmsprop
 from keras.callbacks import ModelCheckpoint, Callback
 import os, random
 import cv2
-from skimage import restoration
+from skimage import restoration, transform
+import pywt
+from sklearn import neighbors
 from scipy.ndimage import imread
 import numpy as np
+import matplotlib.pyplot as plt
 
 _AUTHENTIC_IMAGES = "Au"
 _TAMPERED_IMAGES = "Tp"
 _VAL_AUTHENTIC_IMAGES = "Val_Au"
 _VAL_TAMPERED_IMAGES = "Val_Tp"
 _BATCH_SIZE = 1
-_CHANNELS = 15
+_CHANNELS = 30
 _MODEL = "authenticator_weights"+str(_CHANNELS)+".hdf5"
 
 
@@ -58,6 +61,17 @@ def validation_data_generator():
                 yield np.asarray(x), np.asarray(out[i:i+_BATCH_SIZE])
 
 
+def resize(img):
+    out = np.zeros([2 * shp for shp in img.shape])
+    for i in range(img.shape[0]):
+        for j in range(img.shape[1]):
+            out[2 * i, 2 * j] = img[i, j]
+            out[2 * i + 1, 2 * j] = img[i, j]
+            out[2 * i, 2 * j + 1] = img[i, j]
+            out[2 * i + 1, 2 * j + 1] = img[i, j]
+    return out
+
+
 def process_image(img):
     shp = img.shape
     for i in range(shp[-1]):
@@ -74,9 +88,16 @@ def process_image(img):
         denoise = restoration.unsupervised_wiener(img[...,i], psf)[0]
         img = np.concatenate((img, (img[...,i]-denoise).reshape(shp[0], shp[1], 1)), axis=-1)
 
-        #psf = np.ones((5, 5)) / 25
-        #denoise = restoration.unsupervised_wiener(img[..., i], psf)[0]
-        #img = np.concatenate((img, (img[..., i]-denoise).reshape(shp[0], shp[1], 1)), axis=-1)
+        norm = cv2.normalize(img[...,i], 0, 255, cv2.NORM_MINMAX)
+        cA, (cH, cV, cD) = pywt.wavedec2(norm, "haar", level=1)
+        img = np.concatenate((img, resize(cA).reshape(shp[0], shp[1], 1)), axis=-1)
+        img = np.concatenate((img, resize(cH).reshape(shp[0], shp[1], 1)), axis=-1)
+        img = np.concatenate((img, resize(cV).reshape(shp[0], shp[1], 1)), axis=-1)
+        img = np.concatenate((img, resize(cD).reshape(shp[0], shp[1], 1)), axis=-1)
+
+        edges = cv2.Canny(np.uint8(img[...,i].reshape(shp[0], shp[1], 1)), 100, 200)
+        img = np.concatenate((img, edges.reshape(shp[0], shp[1], 1)), axis=-1)
+
     return img
 
 
@@ -107,15 +128,22 @@ def data_generator():
 def build_model():
     model = Sequential()
     model.add(Conv2D(32, 3, activation='relu', input_shape=(None, None, _CHANNELS)))
+    model.add(BatchNormalization())
     model.add(Conv2D(32, 3, activation='relu'))
     model.add(MaxPooling2D(2, strides=2))
-    model.add(Dropout(0.25))
+    model.add(BatchNormalization())
     model.add(Conv2D(32, 3, activation='relu'))
+    model.add(BatchNormalization())
     model.add(Conv2D(32, 3, activation='relu'))
     model.add(MaxPooling2D(2, strides=2))
+    model.add(BatchNormalization())
     model.add(Conv2D(64, 3, activation='relu'))
+    model.add(BatchNormalization())
     model.add(Conv2D(64, 3, activation='relu'))
     model.add(GlobalMaxPooling2D())
+    model.add(BatchNormalization())
+    model.add(Dropout(0.5))
+    model.add(Dense(64, activation='relu'))
     model.add(Dropout(0.5))
     model.add(Dense(1, activation='sigmoid'))
     model.compile(optimizer=rmsprop(.0001), loss='binary_crossentropy', metrics=['accuracy'])
