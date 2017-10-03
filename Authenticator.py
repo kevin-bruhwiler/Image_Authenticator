@@ -13,7 +13,7 @@ _TAMPERED_IMAGES = "Tp"
 _VAL_AUTHENTIC_IMAGES = "Val_Au"
 _VAL_TAMPERED_IMAGES = "Val_Tp"
 _BATCH_SIZE = 1
-_CHANNELS = 18
+_CHANNELS = 15
 _MODEL = "authenticator_weights"+str(_CHANNELS)+".hdf5"
 
 
@@ -134,7 +134,7 @@ def run():
     num, num_val = preprocess()
     model = build_model()
     checkpoint = ModelCheckpoint(_MODEL, verbose=1, monitor='val_loss', save_best_only=True)
-    log = LossHistory("log.txt")
+    log = LossHistory("log"+str(_CHANNELS)+".txt")
     callback_list = [checkpoint, log]
     if os.path.isfile(_MODEL):
         model.load_weights(_MODEL)
