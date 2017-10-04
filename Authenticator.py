@@ -2,11 +2,12 @@ from keras.models import Sequential
 from keras.layers import Dense, Conv2D, MaxPooling2D, Dropout, GlobalMaxPooling2D, BatchNormalization
 from keras.optimizers import rmsprop
 from keras.callbacks import ModelCheckpoint, Callback
+from keras.constraints import Constraint
+import keras.backend as K
 import os, random
 import cv2
-from skimage import restoration, transform
+from skimage import restoration
 import pywt
-from sklearn import neighbors
 from scipy.ndimage import imread
 import numpy as np
 import matplotlib.pyplot as plt
@@ -18,6 +19,23 @@ _VAL_TAMPERED_IMAGES = "Val_Tp"
 _BATCH_SIZE = 1
 _CHANNELS = 30
 _MODEL = "authenticator_weights"+str(_CHANNELS)+".hdf5"
+
+
+class ConstrainedConvolution(Constraint):
+    def __init__(self, m=1.):
+        self.m = m
+
+    def __call__(self, p):
+        K.set_value(p[2][2], K.variable(np.zeros(p[2][2].shape)))
+        import sys
+        sys.exit()
+        p = K.transpose(p)
+        unit_norm = p / (K.sqrt(K.sum(K.square(p), axis=0)) + 1e-7)
+        unit_norm = K.transpose(unit_norm)
+        return unit_norm * self.m
+
+    def get_config(self):
+        return {'name': self.__class__.__name__, 'm': self.m}
 
 
 class LossHistory(Callback):
@@ -127,7 +145,8 @@ def data_generator():
 
 def build_model():
     model = Sequential()
-    model.add(Conv2D(32, 3, activation='relu', input_shape=(None, None, _CHANNELS)))
+    model.add(Conv2D(32, 5, activation='relu', kernel_constraint=ConstrainedConvolution(),
+                     use_bias=False , input_shape=(None, None, _CHANNELS)))
     model.add(BatchNormalization())
     model.add(Conv2D(32, 3, activation='relu'))
     model.add(MaxPooling2D(2, strides=2))
